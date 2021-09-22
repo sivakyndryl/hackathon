@@ -1,0 +1,73 @@
+---
+# tasks file for pre_update
+#
+
+- name: Start the email notifiation
+  mail:
+    subject: "OS Patching for begin in {{ wait_time }} minutes!"
+    from: "{{ from_email }}"
+    body: | 
+      Hello All,
+      I am the Open Systems robot here to help you patch your Linux Servers today. This is to inform you that I am going to start patching your servers in {{ wait_time }} minute(s):
+
+      {{ ansible_play_hosts | join(',') }}
+
+      Any questions please dont respond to me, where I cant respond" - Send an email to the GlobalOpenSystems Team !
+    to: "{{ app_email }}" 
+    charset: utf8
+  delegate_to: localhost
+  tags: mail
+  run_once: true
+
+- name: Send out a console message
+  shell: "wall 'OS Patching will begin in {{ wait_time }}' minutes!! Please logoff as this might require a reboot."
+
+# TODO: delete the tarball after transfer
+- name: Backup configuration
+  shell: |
+    DATE=`date "+%s"`_${HOSTNAME}
+    
+    mkdir "/tmp/$DATE"
+    
+    cp /etc/ssh/sshd_config "/tmp/$DATE/"
+    cp /etc/sssd/sssd.conf "/tmp/$DATE/"
+    cp /etc/fstab "/tmp/$DATE/"
+    mount > "/tmp/$DATE/mount.txt"
+    if [ -e "/etc/ntp.conf" ]; then
+            cp /etc/ntp.conf "/tmp/$DATE/ntp.conf"
+    fi
+    if [ -e "/etc/chrony.conf" ]; then
+            cp /etc/chrony.conf "/tmp/$DATE/chrony.conf"
+    fi
+    
+    if [ -e /usr/bin/systemctl ]; then
+            systemctl --failed > "/tmp/$DATE/systemctl_failed.txt"
+    fi
+    
+    
+    ps aux > "/tmp/$DATE/processes.txt"
+    yum repolist 1> "/tmp/$DATE/yum_repolist.txt" 2>&1
+    cp /etc/hosts "/tmp/$DATE/hosts"
+    
+    tar -cvf /tmp/patching.tar "/tmp/$DATE"
+    
+    rm -rf "/tmp/$DATE/" 
+  tags:
+    - skip_ansible_lint
+
+- name: Fetch backup configuration
+  fetch:
+    src: "/tmp/patching.tar"
+    flat: yes
+    dest: dst/{{ ansible_hostname }}_pre_backup.tar
+
+
+- name: Delete the tarball from the machine
+  file:
+    path: /tmp/patching.tar
+    state: absent
+
+# I am adding a pause
+- name: Wait before patching
+  pause:
+    minutes: " {{ wait_time }}"

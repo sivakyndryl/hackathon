@@ -1,0 +1,78 @@
+---
+# tasks file for post_update
+#
+- name: Checking if reboot flag file exists
+  stat:
+    path: /tmp/reboot
+  register: reboot
+
+- name: Deleting the reboot flag file
+  when: reboot.stat.exists == true
+  file:
+    path: /tmp/reboot
+    state: absent
+
+# We won't reboot the host yet. Maybe have a variable? I have never patched a server
+# and not rebooted it to date.
+- name: reboot the host
+  shell: sleep 2 && /sbin/shutdown -r now "Reboot required for updated kernel." && sleep 2
+  async: 1
+  poll: 0
+  ignore_errors: true
+  when: ( reboot.stat.exists == true and reboot_flag == true )
+
+- name: Wait for the host(s) to reboot
+  block:
+    - wait_for_connection:
+        delay: 60
+        timeout: 300
+  when: ( reboot.stat.exists == true and reboot_flag == true )
+  rescue:    
+    - mail:
+        subject: "OS Patching for {{ ansible_hostname }} failed!!!"
+        from: "{{ from_email }}"
+        body: "Automated OS patching for {{ ansible_hostname }} failed. The server never came online!"
+        to: "{{ app_email }}"
+        charset: utf8
+      delegate_to: localhost
+      tags: mail
+    - fail:
+        msg: Failed! Server did not come online
+
+
+- name: Email regarding the reboot.
+  when: ( reboot.stat.exists == true and reboot_flag == false )
+  mail:
+    subject: "OS Patching"
+    from: "{{ from_email }}"
+    body: | 
+      Hello All,
+      I am the Open Systems robot here to help you patch your Linux Servers today. This is to inform you that {{ ansible_hostname }} requires a reboot
+
+      Any questions please dont respond to me, where I cant respond" - Send an email to the GlobalOpenSystems Team !
+    to: "{{ app_email }}" 
+    charset: utf8
+  delegate_to: localhost
+  tags: mail
+  
+  
+
+- name: Start the email notifiation
+  mail:
+    subject: "OS Patching is completed"
+    from: "{{ from_email }}"
+    body: | 
+      Hello All,
+      I am the Open Systems robot here and I wanted to let you know that patching is complete
+
+      {{ ansible_play_hosts | join(',') }}
+
+      Any questions please dont respond to me, where I cant respond" - Send an email to the GlobalOpenSystems Team !
+    to: "{{ app_email }}" 
+    charset: utf8
+  delegate_to: localhost
+  tags: mail
+  run_once: true
+
+- name: Send out a console message
+  shell: "wall 'OS Patching is completed!!'"
